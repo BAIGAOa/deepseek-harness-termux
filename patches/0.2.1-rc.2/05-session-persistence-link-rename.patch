@@ -1,0 +1,44 @@
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -1,7 +1,7 @@
+ import z from "@deepseek-ai/schemastery";
+ import { SessionFormatUnsupportedMigrationError, createSessionFormatCatalogWithChildren, historicalSessionFormatCatalog, sessionFormatCatalog } from "@deepseek-ai/dsh-session-format-catalog";
+ import { readdirSync } from "node:fs";
+-import { link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from "node:fs/promises";
++import { link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, truncate } from "node:fs/promises";
+ import { basename, dirname, isAbsolute, join, parse, resolve, toNamespacedPath } from "node:path";
+ import { performance } from "node:perf_hooks";
+ import { scheduler } from "node:timers/promises";
+@@ -2038,10 +2038,15 @@
+ 	try {
+ 		await internals.fs.link(staged, currentPath);
+ 	} catch (error) {
+-		/* v8 ignore else -- a non-collision filesystem error propagates unchanged. */
+-		if (isEEXIST(error)) return false;
+-		/* v8 ignore next -- the filesystem error is already complete. */
+-		throw error;
++		/* Android sepolicy blocks link(2) with EACCES/EPERM; use same-fs rename. */
++		if (error?.code === "EACCES" || error?.code === "EPERM") {
++			await internals.fs.rename(staged, currentPath);
++		} else {
++			/* v8 ignore else -- a non-collision filesystem error propagates unchanged. */
++			if (isEEXIST(error)) return false;
++			/* v8 ignore next -- the filesystem error is already complete. */
++			throw error;
++		}
+ 	}
+ 	await syncDirectory(dirname(currentPath), internals);
+ 	return true;
+@@ -3225,6 +3230,12 @@
+ 		try {
+ 			await link(tmp, finalPath);
+ 			linked = true;
++		} catch (error) {
++			/* Android sepolicy blocks link(2) with EACCES/EPERM; use same-fs rename. */
++			if (error?.code === "EACCES" || error?.code === "EPERM") {
++				await rename(tmp, finalPath);
++				linked = true;
++			} else throw error;
+ 		} finally {
+ 			/* v8 ignore next -- link failure is the TOCTOU/IO race guarded above; not reachable in test */
+ 			if (!linked) await rm(tmp, { force: true });

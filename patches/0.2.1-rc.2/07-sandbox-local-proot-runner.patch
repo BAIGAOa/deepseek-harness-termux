@@ -1,0 +1,107 @@
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -15,6 +15,24 @@
+ * @module @deepseek-ai/dsh-sandbox-local/profiles
+ */
+ /**
++* Build the proot profile arguments for one file-effect policy.
++*
++* Termux/Android: proot uses ptrace-based user-space binds (no user or mount
++* namespaces), so it works where bwrap cannot. proot binds are read-write by
++* default, so read-only enforcement is not provided — this runner is "partial".
++* @param policy - file-effect policy to express as proot binds.
++* @returns profile arguments before the command argv.
++*/
++function prootProfileArgs(policy) {
++	const args = ["-b", "/:/", "-b", "/dev:/dev", "-b", "/proc:/proc"];
++	if (policy.mode === "workspace-write") {
++		const termuxTmp = process.env.PREFIX ? process.env.PREFIX + "/tmp" : "/data/data/com.termux/files/usr/tmp";
++		args.push("-b", termuxTmp + ":/tmp");
++		args.push("-b", policy.workspaceRoot + ":" + policy.workspaceRoot);
++	}
++	return args;
++}
++/**
+ * Build the bwrap profile arguments for one file-effect policy.
+ * @param policy - file-effect policy to express as bwrap mounts.
+ * @returns profile arguments before the trailing separator and command argv.
+@@ -97,6 +115,18 @@
+ * readable by the Low-integrity child.
+ * @module @deepseek-ai/dsh-sandbox-local
+ */
++/** Probe whether `proot` can create the profile on Android/Termux. */
++function defaultProbeProot(timeoutMs) {
++	return spawnSync("proot", [
++		"-b", "/:/",
++		"-b", "/dev:/dev",
++		"-b", "/proc:/proc",
++		"true"
++	], {
++		timeout: timeoutMs,
++		stdio: "ignore"
++	}).status === 0;
++}
+ /** Probe whether `bwrap` can create the profile; the provider caches the bounded result. */
+ function defaultProbeBwrap(timeoutMs) {
+ 	return spawnSync("bwrap", [
+@@ -172,6 +202,7 @@
+ */
+ const PLATFORM_CHAINS = {
+ 	linux: ["bwrap", "landlock"],
++	android: ["proot", "bwrap", "landlock"],
+ 	darwin: ["seatbelt"],
+ 	win32: ["windows-acl"]
+ };
+@@ -187,6 +218,7 @@
+ const STATIC_ENFORCEMENT = {
+ 	bwrap: "full",
+ 	landlock: "full",
++	proot: "partial",
+ 	seatbelt: "full",
+ 	"windows-acl": "partial"
+ };
+@@ -206,6 +238,7 @@
+ const DENIAL_SIGNATURES = {
+ 	bwrap: ["read-only file system"],
+ 	landlock: ["permission denied"],
++	proot: ["read-only file system", "permission denied"],
+ 	seatbelt: ["operation not permitted"],
+ 	"windows-acl": [
+ 		"access is denied",
+@@ -229,6 +262,7 @@
+ * `packages/test-support/session-snapshot/tests/fixtures/partial-landlock-sandbox.ts`.
+ */
+ const RUNNER_FAILURE_RULES = {
++	proot: [{ fatalSignatures: ["proot: ", "proot warning: "] }],
+ 	bwrap: [{ fatalSignatures: ["bwrap: "] }],
+ 	landlock: [{
+ 		allowedExitCodes: [LAUNCHER_FAILURE_EXIT],
+@@ -321,10 +355,11 @@
+ 		});
+ 		const selected = this.selectRunner(policy.mode);
+ 		const runnerArgv = this.runnerArgv(selected.runner, policy);
++		const separator = selected.runner === "proot" ? [] : ["--"];
+ 		return Promise.resolve({
+ 			argv: [
+ 				...runnerArgv,
+-				"--",
++				...separator,
+ 				...argv
+ 			],
+ 			enforcement: selected.enforcement,
+@@ -336,6 +371,7 @@
+ 	runnerArgv(runner, policy) {
+ 		switch (runner) {
+ 			case "bwrap": return ["bwrap", ...bwrapProfileArgs(policy)];
++			case "proot": return ["proot", ...prootProfileArgs(policy)];
+ 			case "landlock": return [this.landlockLauncher(), ...landlockProfileArgs(policy)];
+ 			case "seatbelt": return [this.seatbeltExec(), ...seatbeltProfileArgs(policy)];
+ 			case "windows-acl": return this.windowsAclRunnerArgv(policy);
+@@ -514,6 +550,7 @@
+ 	probeRunner(runner) {
+ 		switch (runner) {
+ 			case "bwrap": return (this.internals.probeBwrap ?? (() => defaultProbeBwrap(this.probeTimeoutMs)))() ? "full" : "unusable";
++			case "proot": return (this.internals.probeProot ?? (() => defaultProbeProot(this.probeTimeoutMs)))() ? "partial" : "unusable";
+ 			case "landlock": return (this.internals.probeLandlock ?? ((launcher) => probe(launcher, { timeoutMs: this.probeTimeoutMs })))(this.landlockLauncher());
+ 			case "seatbelt": return (this.internals.probeSeatbelt ?? ((exec) => defaultProbeSeatbelt(exec, this.probeTimeoutMs)))(this.seatbeltExec()) ? "full" : "unusable";
+ 			case "windows-acl": return (this.internals.probeWindowsAcl ?? (() => defaultProbeWindowsAcl(this.windowsAclRunnerInvocation(), this.probeTimeoutMs)))() ? "partial" : "unusable";

@@ -1,0 +1,43 @@
+--- a/lib/flock.js
++++ b/lib/flock.js
+@@ -3,6 +3,20 @@
+ import { dirname, join } from 'node:path';
+ import { getSystemErrorName } from 'node:util';
+ let binding;
++let androidFlock;
++/**
++ * Termux/Android has no prebuilt package (and a glibc-built binary cannot load
++ * into bionic Node). Call libc's flock(2) through koffi instead. LOCK_EX|LOCK_NB
++ * never blocks, so the synchronous native call keeps the async API's semantics.
++ */
++function loadAndroidFlock() {
++    if (androidFlock)
++        return androidFlock;
++    const require = createRequire(import.meta.url);
++    const koffi = require('koffi');
++    androidFlock = koffi.load('libc.so').func('int flock(int fd, int operation)');
++    return androidFlock;
++}
+ function loadBinding() {
+     if (binding)
+         return binding;
+@@ -37,6 +51,19 @@
+  *   platforms, and addon loading failures reject; importing alone does not load it.
+  */
+ export async function tryLockExclusive(fd) {
++    if (process.platform === 'android') {
++        const rc = loadAndroidFlock()(fd, 2 | 4); // LOCK_EX | LOCK_NB
++        if (rc === 0)
++            return;
++        const require = createRequire(import.meta.url);
++        const androidErrno = require('koffi').errno();
++        const androidCode = getSystemErrorName(-androidErrno);
++        throw Object.assign(new Error(`${androidCode}: flock failed`), {
++            code: androidCode,
++            errno: androidErrno,
++            syscall: 'flock',
++        });
++    }
+     const errno = await new Promise((resolve) => {
+         loadBinding().tryLock(fd, resolve);
+     });

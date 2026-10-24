@@ -1,0 +1,25 @@
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -2,11 +2,20 @@
+ import { ENCODING_PREAMBLE, resolvePwshPath } from "@deepseek-ai/dsh-pwsh-local";
+ import z from "@deepseek-ai/schemastery";
+ import { Buffer } from "node:buffer";
++import { existsSync } from "node:fs";
+ import { createLazyRequire } from "@deepseek-ai/dsh-lazy-require";
+ //#region lib/types/config.js
+ /** Validated configuration for the local PTY backend. */
+-/** Bash dialect default executable. */
+-const DEFAULT_BASH_SHELL = "/bin/bash";
++/**
++* Bash dialect default executable. Termux/Android has no /bin/bash: resolve
++* the Termux prefix first (PREFIX is set by every Termux shell), then fall
++* back to Android's /system/bin/sh.
++*/
++const DEFAULT_BASH_SHELL = [
++	process.env.PREFIX ? `${process.env.PREFIX}/bin/bash` : undefined,
++	"/system/bin/sh",
++	"/bin/bash"
++].find((path) => path !== undefined && existsSync(path)) ?? "/bin/bash";
+ /** Bash dialect default arguments (interactive, profile-free). */
+ const DEFAULT_BASH_ARGS = [
+ 	"--noprofile",

@@ -1,0 +1,20 @@
+--- a/lib/runner-launch-B2zsQ1Dz.js
++++ b/lib/runner-launch-B2zsQ1Dz.js
+@@ -667,7 +667,7 @@
+ * @returns Platform process inspector.
+ */
+ function createProcessInspector(platform = process.platform, arch = process.arch, internals = DEFAULT_INTERNALS) {
+-	if (platform === "linux") return new LinuxProcessInspector(arch, internals);
++	if (platform === "linux" || platform === "android") return new LinuxProcessInspector(arch, internals);
+ 	if (platform === "darwin") return new MacProcessInspector(internals);
+ 	if (platform === "win32") return createWindowsProcessInspector();
+ 	throw new Error(`subprocess-local: terminal inspection is unsupported on platform ${platform}`);
+@@ -808,7 +808,7 @@
+ 		if (platform === "win32") return child.exitCode === null && child.signalCode === null;
+ 		try {
+ 			process.kill(-pid, 0);
+-			if (directSettled && platform === "linux" && linuxGroupHasLiveMembers(pid) === false) return false;
++			if (directSettled && (platform === "linux" || platform === "android") && linuxGroupHasLiveMembers(pid) === false) return false;
+ 			return true;
+ 		} catch (error) {
+ 			const code = error.code;

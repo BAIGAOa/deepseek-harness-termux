@@ -1,0 +1,77 @@
+--- a/lib/native/base/base.cc
++++ b/lib/native/base/base.cc
+@@ -78,7 +78,20 @@
+     #include <grp.h>
+     #include <poll.h>
+     #include <signal.h>
++#if defined(__ANDROID__)
++    // Termux/Android: Bionic exports posix_spawn since API 28, but the
++    // Termux ndk-sysroot may not ship <spawn.h>. Declare the subset koffi uses.
++    #include <sys/types.h>
++    typedef struct { int __allocated; int __action_count; void *__entries; } posix_spawn_file_actions_t;
++    extern "C" {
++    int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const void *attrp, char *const argv[], char *const envp[]);
++    int posix_spawn_file_actions_init(posix_spawn_file_actions_t *file_actions);
++    int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *file_actions);
++    int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *file_actions, int fd, int newfd);
++    }
++#else
+     #include <spawn.h>
++#endif
+     #include <sys/ioctl.h>
+     #include <sys/mman.h>
+     #include <sys/resource.h>
+@@ -2949,7 +2962,8 @@
+ 
+ static StatResult StatAt(int fd, bool fd_is_directory, const char *filename, unsigned int flags, FileInfo *out_info)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) && !defined(__ANDROID__)
++    // Android's Bionic headers do not expose statx(); use fstatat/fstat below.
+     const char *pathname = filename;
+     int stat_flags = (flags & (int)StatFlag::FollowSymlink) ? 0 : AT_SYMLINK_NOFOLLOW;
+     int stat_mask = STATX_TYPE | STATX_MODE | STATX_MTIME | STATX_BTIME | STATX_SIZE;
+@@ -5413,6 +5427,30 @@
+     K_CRITICAL(success, "Failed to create interrupt pipe");
+ }
+ 
++#if defined(__ANDROID__)
++// Termux/Android has no /bin: resolve sh/env through $PREFIX or /system/bin.
++static const char *AndroidToolPath(const char *name)
++{
++    static char buf[PATH_MAX];
++    const char *prefix = getenv("PREFIX");
++
++    if (prefix && *prefix) {
++        snprintf(buf, sizeof(buf), "%s/bin/%s", prefix, name);
++        if (access(buf, X_OK) == 0)
++            return buf;
++    }
++
++    snprintf(buf, sizeof(buf), "/system/bin/%s", name);
++    return buf;
++}
++
++    #define KOFFI_SHELL_PATH AndroidToolPath("sh")
++    #define KOFFI_ENV_PATH AndroidToolPath("env")
++#else
++    #define KOFFI_SHELL_PATH "/bin/sh"
++    #define KOFFI_ENV_PATH "/bin/env"
++#endif
++
+ bool ExecuteCommandLine(const char *cmd_line, const ExecuteInfo &info,
+                         FunctionRef<Span<const uint8_t>()> in_func,
+                         FunctionRef<void(Span<uint8_t> buf)> out_func, int *out_code)
+@@ -5485,10 +5523,10 @@
+ 
+         if (info.work_dir) {
+             const char *argv[] = { "env", "-C", info.work_dir, "sh", "-c", cmd_line, nullptr };
+-            errno = posix_spawn(&pid, "/bin/env", &file_actions, nullptr, const_cast<char **>(argv), new_env.ptr ? new_env.ptr : environ);
++            errno = posix_spawn(&pid, KOFFI_ENV_PATH, &file_actions, nullptr, const_cast<char **>(argv), new_env.ptr ? new_env.ptr : environ);
+         } else {
+             const char *argv[] = { "sh", "-c", cmd_line, nullptr };
+-            errno = posix_spawn(&pid, "/bin/sh", &file_actions, nullptr, const_cast<char **>(argv), new_env.ptr ? new_env.ptr : environ);
++            errno = posix_spawn(&pid, KOFFI_SHELL_PATH, &file_actions, nullptr, const_cast<char **>(argv), new_env.ptr ? new_env.ptr : environ);
+         }
+         if (errno) {
+             LogError("Failed to start process: %1", strerror(errno));

@@ -1,0 +1,34 @@
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -1,22 +1,22 @@
+ "use strict";
+-var __importDefault = (this && this.__importDefault) || function (mod) {
+-    return (mod && mod.__esModule) ? mod : { "default": mod };
+-};
++// Android/Termux fallback: this package ships prebuilt native addons for
++// desktop platforms only and fails closed elsewhere. When node is started
++// with --expose-internals (required by dsh on Android anyway), the Node
++// internals can be reached through the normal require() path instead.
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.requireBuiltin = requireBuiltin;
+ exports.isAllowedInternalId = isAllowedInternalId;
+ exports.getBindingInfo = getBindingInfo;
+-const node_path_1 = __importDefault(require("node:path"));
+-const { createEntryApi } = require('node-addon-native-custom-loader');
+-const api = createEntryApi(node_path_1.default.resolve(__dirname, '..'));
++const { createRequire } = require("node:module");
++const req = createRequire(__filename);
+ function requireBuiltin(moduleId) {
+-    return api.requireBuiltin(moduleId);
++    return req(moduleId.startsWith("node:") ? moduleId : "node:" + moduleId);
+ }
+ function isAllowedInternalId(moduleId) {
+-    return api.isAllowedInternalId(moduleId);
++    return true;
+ }
+ function getBindingInfo() {
+-    return api.getBindingInfo();
++    return { backend: "js", abi: null, loadPath: null };
+ }
+ exports.default = {
+     requireBuiltin,
