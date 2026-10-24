@@ -105,8 +105,7 @@ apply_patch() {
     local pkgdir="$1" patchfile="$2"
     local name; name="$(basename "$patchfile")"
     if [ ! -d "$pkgdir" ]; then
-        warn "package missing for $name: $pkgdir"
-        return 1
+        fail "required package missing for $name: $pkgdir"
     fi
     if (cd "$pkgdir" && patch -p1 --dry-run --reverse < "$patchfile" >/dev/null 2>&1); then
         ok "$name (already applied)"
@@ -117,8 +116,8 @@ apply_patch() {
         ok "$name"
         return 0
     fi
-    warn "$name does not apply (upstream version drift?) — skipping"
-    return 1
+    warn "$name does not apply (upstream version drift?)"
+    fail "cannot continue without patch: $name"
 }
 
 NM="$DSH_DIR/node_modules"
@@ -203,11 +202,13 @@ fi
 # "cannot host this launch" and falls back to a separate dsh process).
 TUI_BIN="$TUI_PROFILE/bin/dsh-tui.js"
 if [ -f "$TUI_BIN" ]; then
-    if grep -qF 'spawn(process.execPath, [entry, ...appArgs]' "$TUI_BIN"; then
+    if grep -qF 'spawn(process.execPath, ["--expose-internals", entry, ...appArgs]' "$TUI_BIN"; then
+        ok 'dsh-tui host-entry spawn already patched'
+    elif grep -qF 'spawn(process.execPath, [entry, ...appArgs]' "$TUI_BIN"; then
         sed -i 's/spawn(process\.execPath, \[entry, \.\.\.appArgs\]/spawn(process.execPath, ["--expose-internals", entry, ...appArgs]/' "$TUI_BIN"
         ok 'dsh-tui host-entry spawn patched'
     else
-        ok 'dsh-tui host-entry spawn already patched'
+        warn 'dsh-tui host-entry spawn pattern not found; TUI may fall back to a separate process'
     fi
 fi
 
